@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Clickilig Photo Booth 📸</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      background: #111;
+      color: white;
+      margin: 0;
+      padding: 20px;
+      text-align: center;
+    }
+    #preview { 
+      width: 100%; max-width: 640px; 
+      border: 8px solid #fff; 
+      border-radius: 12px; 
+      margin: 20px auto; 
+      background: black;
+      position: relative; /* For overlays */
+    }
+    #overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      opacity: 0.8; /* Adjustable */
+      background-size: contain;
+      background-repeat: no-repeat;
+      background-position: center;
+    }
+    .strip {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 30px auto;
+      max-width: 400px;
+      padding: 20px;
+      background: white;
+      color: black;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      position: relative; /* For strip background */
+    }
+    #strip-background {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0.5; /* Adjustable */
+      background-size: cover;
+      background-repeat: no-repeat;
+      background-position: center;
+      z-index: -1;
+    }
+    .photo {
+      width: 100%;
+      border: 4px solid #000;
+      border-radius: 8px;
+    }
+    button {
+      padding: 14px 32px;
+      font-size: 1.3rem;
+      margin: 10px;
+      border: none;
+      border-radius: 50px;
+      background: #e91e63;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover { background: #c2185b; }
+    #countdown { font-size: 5rem; color: #ffeb3b; }
+    select { padding: 12px; font-size: 1.1rem; margin: 10px; }
+    input[type="file"] { margin: 10px; }
+    label { font-size: 1.1rem; display: block; margin: 10px 0 5px; }
+  </style>
+</head>
+<body>
+
+  <h1>Clickilig Photo Booth ✨</h1>
+  <p>Take 4 fun shots → make a cute strip → download! Customize with your own filters and strips.</p>
+
+  <video id="preview" autoplay playsinline></video>
+  <div id="overlay"></div> <!-- For custom filter/overlay -->
+  <canvas id="canvas" style="display:none;"></canvas>
+
+  <div>
+    <label>Built-in Filter: </label>
+    <select id="filter">
+      <option value="none">Normal</option>
+      <option value="grayscale">Grayscale</option>
+      <option value="sepia">Sepia</option>
+      <option value="invert">Negative</option>
+      <option value="contrast(1.4)">High Contrast</option>
+    </select>
+  </div>
+
+  <!-- Upload buttons -->
+  <label>Upload Custom Filter/Overlay (PNG/JPG for stickers/frames):</label>
+  <input type="file" id="upload-filter" accept="image/*">
+
+  <label>Upload Custom Strip Background (JPG/PNG for the strip frame):</label>
+  <input type="file" id="upload-strip" accept="image/*">
+
+  <button id="start">Start Photobooth!</button>
+  <div id="countdown"></div>
+
+  <div class="strip" id="strip" style="display:none;">
+    <div id="strip-background"></div> <!-- For custom strip bg -->
+    <h2>Your Photo Strip</h2>
+    <div id="photos"></div>
+    <button id="download">Download Strip</button>
+    <button id="reset">Take Again</button>
+  </div>
+
+  <script>
+    const video = document.getElementById('preview');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const filterSelect = document.getElementById('filter');
+    const countdownEl = document.getElementById('countdown');
+    const photosContainer = document.getElementById('photos');
+    const strip = document.getElementById('strip');
+    const overlay = document.getElementById('overlay');
+    const stripBg = document.getElementById('strip-background');
+
+    let photos = [];
+    const MAX_PHOTOS = 4;
+    let customOverlayUrl = ''; // For uploaded filter/overlay
+    let customStripBgUrl = ''; // For uploaded strip bg
+
+    // Start camera
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+      } catch (err) {
+        alert("Camera access denied 😢 Please allow camera in your browser!");
+      }
+    }
+
+    startCamera();
+
+    // Built-in filter
+    filterSelect.onchange = () => {
+      video.style.filter = filterSelect.value;
+    };
+
+    // Handle upload for custom filter/overlay
+    document.getElementById('upload-filter').onchange = (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          customOverlayUrl = event.target.result;
+          overlay.style.backgroundImage = `url(${customOverlayUrl})`;
+        };
+        reader.readAsDataURL(file);
+      }
+    };
+
+    // Handle upload for custom strip background
+    document.getElementById('upload-strip').onchange = (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          customStripBgUrl = event.target.result;
+          stripBg.style.backgroundImage = `url(${customStripBgUrl})`;
+        };
+        reader.readAsDataURL(file);
+      }
+    };
+
+    // Countdown & capture
+    document.getElementById('start').onclick = () => {
+      photos = [];
+      photosContainer.innerHTML = '';
+      strip.style.display = 'none';
+      captureSequence();
+    };
+
+    function captureSequence() {
+      let count = 3;
+      const interval = setInterval(() => {
+        countdownEl.textContent = count > 0 ? count : "📸 CHEESE!";
+        if (count === 0) {
+          captureOne();
+          count = 4; // reset for next photo
+          if (photos.length >= MAX_PHOTOS) {
+            clearInterval(interval);
+            countdownEl.textContent = "";
+            showStrip();
+          }
+        }
+        count--;
+      }, 1000);
+    }
+
+    function captureOne() {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.filter = getComputedStyle(video).filter;
+      ctx.drawImage(video, 0, 0);
+
+      // Apply custom overlay if uploaded
+      if (customOverlayUrl) {
+        const img = new Image();
+        img.src = customOverlayUrl;
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        };
+      }
+
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      photos.push(dataUrl);
+
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      img.className = 'photo';
+      photosContainer.appendChild(img);
+    }
+
+    function showStrip() {
+      strip.style.display = 'block';
+      if (customStripBgUrl) {
+        stripBg.style.backgroundImage = `url(${customStripBgUrl})`;
+      }
+    }
+
+    // Download as one image
+    document.getElementById('download').onclick = () => {
+      const finalCanvas = document.createElement('canvas');
+      finalCanvas.width = 400;
+      finalCanvas.height = 400 * MAX_PHOTOS + 100; // extra for title
+      const fCtx = finalCanvas.getContext('2d');
+
+      // Apply custom strip bg if any
+      if (customStripBgUrl) {
+        const bgImg = new Image();
+        bgImg.src = customStripBgUrl;
+        bgImg.onload = () => {
+          fCtx.drawImage(bgImg, 0, 0, finalCanvas.width, finalCanvas.height);
+          drawContent();
+        };
+      } else {
+        fCtx.fillStyle = '#fff';
+        fCtx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
+        drawContent();
+      }
+
+      function drawContent() {
+        fCtx.fillStyle = '#000';
+        fCtx.font = 'bold 28px system-ui';
+        fCtx.fillText("Clickilig Moment 💙", 20, 60);
+
+        let loaded = 0;
+        photos.forEach((src, i) => {
+          const img = new Image();
+          img.src = src;
+          img.onload = () => {
+            fCtx.drawImage(img, 0, 100 + i * 400, 400, 400);
+            loaded++;
+            if (loaded === photos.length) {
+              const link = document.createElement('a');
+              link.download = `clickilig-photostrip-${Date.now()}.jpg`;
+              link.href = finalCanvas.toDataURL('image/jpeg', 0.95);
+              link.click();
+            }
+          };
+        });
+      }
+    };
+
+    document.getElementById('reset').onclick = () => {
+      strip.style.display = 'none';
+      photos = [];
+      photosContainer.innerHTML = '';
+    };
+  </script>
+</body>
+</html>
